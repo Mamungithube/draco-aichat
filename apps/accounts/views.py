@@ -13,7 +13,7 @@ from django.core.mail import EmailMultiAlternatives # For sending HTML emails
 from .models import User, Profile # Import both User and Profile
 from .serializers import UserSerializer, RegistrationSerializer
 from .utils import generate_otp # Ensure this utility exists
-
+from .serializers import VerifyOTPSerializer
 # Removed Djoser related imports as you're handling registration manually
 # Removed django.contrib.auth.models.User as you're using your custom User model
 # Removed authenticate, login as you're using token-based auth with OTP verification
@@ -104,6 +104,8 @@ class ResendOTPApiView(APIView):
         return Response({'message': 'New OTP has been sent to your email.'}, status=status.HTTP_200_OK)
 
 
+
+
 class VerifyOTPApiView(APIView):
     def post(self, request, *args, **kwargs):
         email = request.data.get('email')
@@ -125,19 +127,26 @@ class VerifyOTPApiView(APIView):
         except Profile.DoesNotExist:
             return Response({'error': 'User profile not found. Please register first.'}, status=status.HTTP_404_NOT_FOUND)
 
+        # ✅ Check OTP
         if profile.otp == otp:
             user.is_active = True
             user.save(update_fields=['is_active'])
-            profile.otp = None  # Clear OTP after successful verification
-            profile.is_verified = True # Mark profile as verified
-            profile.save(update_fields=['otp', 'is_verified'])
 
-            # Optionally, you can log the user in or return tokens here if you want
-            # For simplicity, we'll just return a success message.
-            # You would typically generate JWT tokens here for auto-login after verification.
-            return Response({'message': 'Account activated successfully.'}, status=status.HTTP_200_OK)
-        else:
-            return Response({'error': 'Invalid OTP.'}, status=status.HTTP_400_BAD_REQUEST)
+            profile.otp = None
+            profile.save(update_fields=['otp'])
+
+            # ✅ Generate JWT Token
+            token_serializer = VerifyOTPSerializer()
+            tokens = token_serializer.create_token(user)
+
+            return Response({
+                'message': 'Account activated successfully.',
+                'access': tokens['access'],
+                'refresh': tokens['refresh']
+            }, status=status.HTTP_200_OK)
+
+        return Response({'error': 'Invalid OTP.'}, status=status.HTTP_400_BAD_REQUEST)
+
 
 
 class LogoutAPIView(APIView):
@@ -164,3 +173,14 @@ class LogoutAPIView(APIView):
         except Exception as e:
             # Catch all exceptions for token invalidity, etc.
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        
+# accounts/views.py
+
+
+class DeleteAccountView(APIView):
+    permission_classes = [IsAuthenticated]  # ✅ JWT token required
+
+    def delete(self, request):
+        user = request.user
+        user.delete()
+        return Response({"message": "Account deleted successfully."}, status=status.HTTP_204_NO_CONTENT)

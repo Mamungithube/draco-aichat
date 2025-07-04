@@ -4,7 +4,7 @@ from .models import User, Profile # Import Profile model
 from .utils import generate_otp # Make sure utils.py is in the same directory
 from django.core.mail import send_mail
 # from rest_framework_simplejwt.tokens import RefreshToken # Not directly used in serializers, but useful for views
-
+from rest_framework_simplejwt.tokens import RefreshToken
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -28,11 +28,16 @@ class RegistrationSerializer(serializers.ModelSerializer):
         # Only 'email' is required for registration, no password, etc.
         fields = ['email'] # Only email for registration
 
-    def validate_email(self, value):
-        # Ensure email is unique during registration
-        if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("This email address is already registered.")
-        return value
+class VerifyOTPSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    otp = serializers.CharField(max_length=6)
+
+    def create_token(self, user):
+        refresh = RefreshToken.for_user(user)
+        return {
+            'refresh': str(refresh),
+            'access': str(refresh.access_token)
+        }
 
     def create(self, validated_data):
         email = validated_data['email']
@@ -62,3 +67,6 @@ class RegistrationSerializer(serializers.ModelSerializer):
         )
 
         return user
+    
+    
+    

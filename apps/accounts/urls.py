@@ -10,7 +10,8 @@ from .views import (
     ResendOTPApiView,
     LogoutAPIView,
     ProfileView,
-    UserAPIView
+    UserAPIView,
+    DeleteAccountView
     # UserAPIView # Removed UserAPIView as it seems redundant with ProfileView and specific requirements
 )
 
@@ -30,7 +31,7 @@ urlpatterns = [
 
     # Logout (requires refresh token to blacklist)
     path('logout/', LogoutAPIView.as_view(), name='logout'),
-
+path('delete-account/', DeleteAccountView.as_view(), name='delete-account'),
     # User profile (retrieve/update)
     path('profile/', ProfileView.as_view(), name='user_profile'),
 ]
