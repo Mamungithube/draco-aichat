@@ -173,12 +173,10 @@ class LogoutAPIView(APIView):
         except Exception as e:
             # Catch all exceptions for token invalidity, etc.
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        
-# accounts/views.py
 
 
 class DeleteAccountView(APIView):
-    permission_classes = [IsAuthenticated]  # ✅ JWT token required
+    permission_classes = [IsAuthenticated] 
 
     def delete(self, request):
         user = request.user

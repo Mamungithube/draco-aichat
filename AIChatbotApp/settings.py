@@ -128,6 +128,14 @@ WSGI_APPLICATION = 'AIChatbotApp.wsgi.application'
 #     }
 # }
 
+SUBSCRIPTION_SETTINGS = {
+    'FREE_TRIAL_DAYS': 3,
+    'CANCELLATION_BUFFER_HOURS': 24,
+    'RENEWAL_REMINDER_HOURS': 24,
+    'DEFAULT_CURRENCY': 'HKD',
+    'STRIPE_WEBHOOK_SECRET': 'your_webhook_secret',
+}
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -188,3 +196,7 @@ EMAIL_USE_TLS = True
 EMAIL_PORT = 587
 EMAIL_HOST_USER = os.getenv("EMAIL")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_PASSWORD")
+
+
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
+STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")

@@ -34,6 +34,14 @@ class UserSubscription(models.Model):
     payment_method = models.CharField(max_length=50, default='apple_pay')  # or 'credit_card', 'google_pay', etc.
     last_payment_date = models.DateTimeField(null=True, blank=True)
     next_payment_date = models.DateTimeField(null=True, blank=True)
+    is_trial = models.BooleanField(default=False)
+    trial_end_date = models.DateTimeField(null=True, blank=True)
+    cancellation_requested = models.BooleanField(default=False)
+    cancellation_date = models.DateTimeField(null=True, blank=True)
+    trial_activated = models.BooleanField(default=False)
+    trial_start_date = models.DateTimeField(null=True, blank=True)
+    trial_end_date = models.DateTimeField(null=True, blank=True)
+    trial_converted = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.user.email} - {self.plan.name}"
@@ -49,3 +57,21 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"Payment #{self.id} - {self.user.email}"
+    
+    
+    
+# Referral system
+class Referral(models.Model):
+    code = models.CharField(max_length=20, unique=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    discount_percent = models.PositiveIntegerField(default=10)
+    is_active = models.BooleanField(default=True)
+    
+    
+    
+class SubscriptionStatusLog(models.Model):
+    subscription = models.ForeignKey(UserSubscription, on_delete=models.CASCADE)
+    status = models.CharField(max_length=20)  # active/cancelled/paused
+    changed_at = models.DateTimeField(auto_now_add=True)
+    reason = models.TextField(null=True, blank=True)
+
