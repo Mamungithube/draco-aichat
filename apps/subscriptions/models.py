@@ -30,18 +30,18 @@ class UserSubscription(models.Model):
     is_active = models.BooleanField(default=True)
     start_date = models.DateTimeField(auto_now_add=True)
     end_date = models.DateTimeField()
-    auto_renew = models.BooleanField(default=True)
-    payment_method = models.CharField(max_length=50, default='apple_pay')  # or 'credit_card', 'google_pay', etc.
+    auto_renew = models.BooleanField(default=True,  blank=True)
+    payment_method = models.CharField(max_length=50, blank=True)  # or 'credit_card', 'google_pay', etc.
     last_payment_date = models.DateTimeField(null=True, blank=True)
     next_payment_date = models.DateTimeField(null=True, blank=True)
-    is_trial = models.BooleanField(default=False)
+    is_trial = models.BooleanField(default=False , blank=True)
     trial_end_date = models.DateTimeField(null=True, blank=True)
-    cancellation_requested = models.BooleanField(default=False)
+    cancellation_requested = models.BooleanField(default=False , blank=True)
     cancellation_date = models.DateTimeField(null=True, blank=True)
-    trial_activated = models.BooleanField(default=False)
+    trial_activated = models.BooleanField(default=False, blank=True)
     trial_start_date = models.DateTimeField(null=True, blank=True)
     trial_end_date = models.DateTimeField(null=True, blank=True)
-    trial_converted = models.BooleanField(default=False)
+    trial_converted = models.BooleanField(default=False , blank=True)
 
     def __str__(self):
         return f"{self.user.email} - {self.plan.name}"

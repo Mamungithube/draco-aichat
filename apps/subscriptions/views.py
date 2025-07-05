@@ -4,12 +4,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from .models import SubscriptionPlan, UserSubscription, Payment ,Referral, SubscriptionStatusLog
-from .serializers import (
-    SubscriptionPlanSerializer, 
-    UserSubscriptionSerializer,
-    PaymentSerializer,
-    UserSerializer
-)
+from .serializers import SubscriptionPlanSerializer, UserSubscriptionSerializer,PaymentSerializer,UserSerializer,ReferralSerializer,SubscriptionStatusLogSerializer,StartTrialSerializer
+
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
@@ -86,69 +82,86 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
     
     
     
-# Referral code validation
-@action(detail=False, methods=['post'])
-def apply_referral(self, request):
-    code = request.data.get('code')
-    try:
-        referral = Referral.objects.get(code=code, is_active=True)
-        # Apply discount logic here
-        return Response({'status': 'Discount applied'})
-    except Referral.DoesNotExist:
-        return Response({'error': 'Invalid referral code'}, status=400)
+    # Referral code validation
+    @action(detail=False, methods=['post'])
+    def apply_referral(self, request):
+        code = request.data.get('code')
+        try:
+            referral = Referral.objects.get(code=code, is_active=True)
+            # Apply discount logic here
+            return Response({'status': 'Discount applied'})
+        except Referral.DoesNotExist:
+            return Response({'error': 'Invalid referral code'}, status=400)
 
-# Free trial subscription
-@action(detail=False, methods=['post'])
-def start_trial(self, request):
-    plan = SubscriptionPlan.objects.get(plan_type='platinum')
-    end_date = timezone.now() + timedelta(days=3)  # 3-day trial
-    
-    subscription = UserSubscription.objects.create(
-        user=request.user,
-        plan=plan,
-        is_active=True,
-        is_trial=True,
-        trial_end_date=end_date,
-        end_date=end_date,
-        auto_renew=True
-    )
-    
-    return Response({'status': 'Trial started'})
+    # Free trial subscription
+    @action(detail=False, methods=['post'])
+    def start_trial(self, request):
+        plan = SubscriptionPlan.objects.get(plan_type='platinum')
+        end_date = timezone.now() + timedelta(days=3)  # 3-day trial
 
+        subscription = UserSubscription.objects.create(
+            user=request.user,
+            plan=plan,
+            is_active=True,
+            is_trial=True,
+            trial_end_date=end_date,
+            end_date=end_date,
+            auto_renew=True
+        )
 
+        return Response({'status': 'Trial started'})
 
 
-# subscriptions/views.py তে স্ট্রাইপ ইন্টিগ্রেশন যোগ করুন
+
+
 import stripe
 from django.conf import settings
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from django.utils import timezone
+from datetime import timedelta
+import logging
+from .models import UserSubscription, SubscriptionPlan, Payment, Referral
+from django.contrib.auth import get_user_model
+import datetime
 
+logger = logging.getLogger(__name__)
+User = get_user_model()
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
 class PaymentViewSet(viewsets.ViewSet):
-    @action(detail=False, methods=['post'])
+    serializer_class = StartTrialSerializer
+    @action(detail=False, methods=['POST'])
     def stripe_webhook(self, request):
         payload = request.body
-        sig_header = request.META['HTTP_STRIPE_SIGNATURE']
-        event = None
+        sig_header = request.META.get('HTTP_STRIPE_SIGNATURE')
+        
+        if not sig_header:
+            return Response({'error': 'Missing signature header'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             event = stripe.Webhook.construct_event(
-                payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
+                payload, 
+                sig_header, 
+                settings.STRIPE_WEBHOOK_SECRET
             )
         except ValueError as e:
-            return Response(status=400)
+            logger.error(f"Invalid payload: {e}")
+            return Response({'error': 'Invalid payload'}, status=status.HTTP_400_BAD_REQUEST)
         except stripe.error.SignatureVerificationError as e:
-            return Response(status=400)
+            logger.error(f"Invalid signature: {e}")
+            return Response({'error': 'Invalid signature'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Handle payment events
+        # Handle different event types
         if event['type'] == 'payment_intent.succeeded':
-            payment_intent = event['data']['object']
-            self._handle_payment_success(payment_intent)
-
-        return Response(status=200)
+            self._handle_payment_success(event['data']['object'])
+        elif event['type'] == 'customer.subscription.created':
+            self._handle_subscription_created(event['data']['object'])
+        
+        return Response({'status': 'success'})
 
     def _handle_payment_success(self, payment_intent):
-        # Find the user and update their subscription
         metadata = payment_intent.get('metadata', {})
         user_id = metadata.get('user_id')
         plan_id = metadata.get('plan_id')
@@ -157,93 +170,160 @@ class PaymentViewSet(viewsets.ViewSet):
             user = User.objects.get(id=user_id)
             plan = SubscriptionPlan.objects.get(id=plan_id)
             
-            # Create or update subscription
-            subscription, created = UserSubscription.objects.get_or_create(
+            subscription, created = UserSubscription.objects.update_or_create(
                 user=user,
                 defaults={
                     'plan': plan,
                     'is_active': True,
                     'end_date': timezone.now() + timedelta(days=30),
-                    'auto_renew': True
+                    'next_payment_date': timezone.now() + timedelta(days=30),
+                    'auto_renew': True,
+                    'payment_method': 'stripe'
                 }
             )
             
-            # Record payment
             Payment.objects.create(
                 user=user,
                 subscription=subscription,
-                amount=payment_intent['amount']/100,  # Convert to dollars
+                amount=payment_intent['amount']/100,
                 transaction_id=payment_intent['id'],
                 payment_method='stripe',
                 is_successful=True
             )
             
-        except (User.DoesNotExist, SubscriptionPlan.DoesNotExist):
-            logger.error(f"Payment succeeded but user/plan not found: {payment_intent['id']}")
-            
-            
-            
-            
-@action(detail=False, methods=['post'])
-def start_trial(self, request):
-    plan_id = request.data.get('plan_id')
-    try:
-        plan = SubscriptionPlan.objects.get(id=plan_id)
+        except (User.DoesNotExist, SubscriptionPlan.DoesNotExist) as e:
+            logger.error(f"Payment processing failed: {str(e)}")
+            # Consider notifying admin here
+
+    @action(detail=False, methods=['POST'])
+    def start_trial(self, request):
+        serializer = StartTrialSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        plan_id = serializer.validated_data.get('plan_id')
         
         if UserSubscription.objects.filter(user=request.user, is_trial=True).exists():
-            return Response({'error': 'You already used your trial'}, status=400)
+            return Response(
+                {'error': 'You have already used your trial period'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            plan = SubscriptionPlan.objects.get(id=plan_id, is_active=True)
+            trial_end = timezone.now() + timedelta(days=3)
             
-        trial_end = timezone.now() + timedelta(days=3)
-        subscription = UserSubscription.objects.create(
-            user=request.user,
-            plan=plan,
-            is_active=True,
-            is_trial=True,
-            trial_start_date=timezone.now(),
-            trial_end_date=trial_end,
-            end_date=trial_end,
-            auto_renew=False
-        )
-        
-        return Response({'status': 'Trial started', 'end_date': trial_end})
-    except SubscriptionPlan.DoesNotExist:
-        return Response({'error': 'Invalid plan'}, status=400)
-    
-    
-@action(detail=False, methods=['post'])
-def apply_referral(self, request):
-    code = request.data.get('code')
-    try:
-        referral = Referral.objects.get(code=code, is_active=True)
-        request.session['referral_discount'] = referral.discount_percent
-        return Response({'discount': referral.discount_percent})
-    except Referral.DoesNotExist:
-        return Response({'error': 'Invalid referral code'}, status=400)
-    
-    
-    
-# views.py তে
-@action(detail=False, methods=['get'])
-def verify_payment(self, request):
-    payment_intent_id = request.query_params.get('payment_intent')
-    
-    try:
-        payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
-        
-        if payment_intent.status == 'succeeded':
-            # Find and update the subscription
-            subscription = UserSubscription.objects.get(
+            subscription = UserSubscription.objects.create(
                 user=request.user,
-                payment_method='stripe',
-                is_active=True
+                plan=plan,
+                is_active=True,
+                is_trial=True,
+                trial_start_date=timezone.now(),
+                trial_end_date=trial_end,
+                end_date=trial_end,
+                auto_renew=False
             )
             
             return Response({
-                'status': 'success',
-                'subscription': UserSubscriptionSerializer(subscription).data
+                'status': 'Trial started successfully',
+                'end_date': trial_end,
+                'plan': plan.name
             })
-        else:
-            return Response({'status': 'failed'}, status=400)
             
-    except Exception as e:
-        return Response({'error': str(e)}, status=400)
+        except SubscriptionPlan.DoesNotExist:
+            return Response(
+                {'error': 'Invalid subscription plan'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=False, methods=['POST'])
+    def apply_referral(self, request):
+        code = request.data.get('code')
+        if not code:
+            return Response(
+                {'error': 'Referral code is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            referral = Referral.objects.get(
+                code=code, 
+                is_active=True,
+                valid_until__gte=timezone.now()
+            )
+            
+            # Apply discount logic
+            request.user.profile.discount_active = True
+            request.user.profile.discount_percent = referral.discount_percent
+            request.user.profile.save()
+            
+            return Response({
+                'success': True,
+                'discount_percent': referral.discount_percent,
+                'message': 'Discount applied successfully'
+            })
+            
+        except Referral.DoesNotExist:
+            return Response(
+                {'error': 'Invalid or expired referral code'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=False, methods=['GET'])
+    def verify_payment(self, request):
+        payment_intent_id = request.query_params.get('payment_intent')
+        if not payment_intent_id:
+            return Response(
+                {'error': 'payment_intent parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+            
+            if payment_intent.status == 'succeeded':
+                subscription = UserSubscription.objects.get(
+                    user=request.user,
+                    payment_method='stripe',
+                    is_active=True
+                )
+                
+                return Response({
+                    'status': 'success',
+                    'subscription': UserSubscriptionSerializer(subscription).data,
+                    'payment_details': {
+                        'amount': payment_intent.amount/100,
+                        'currency': payment_intent.currency,
+                        'date': datetime.fromtimestamp(payment_intent.created)
+                    }
+                })
+                
+            return Response(
+                {'status': 'pending', 'payment_status': payment_intent.status},
+                status=status.HTTP_200_OK
+            )
+            
+        except UserSubscription.DoesNotExist:
+            return Response(
+                {'error': 'Subscription not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except stripe.error.StripeError as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        
+        
+
+class ReferralViewSet(viewsets.ModelViewSet):
+    queryset = Referral.objects.all()
+    serializer_class = ReferralSerializer
+    permission_classes = [IsAuthenticated]  # বা IsAdminUser, যদি কন্ট্রোল দিতে না চাও
+
+class SubscriptionStatusLogViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = SubscriptionStatusLogSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return SubscriptionStatusLog.objects.filter(subscription__user=self.request.user)
