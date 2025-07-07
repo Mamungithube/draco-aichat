@@ -42,7 +42,8 @@ class UserSubscription(models.Model):
     trial_start_date = models.DateTimeField(null=True, blank=True)
     trial_end_date = models.DateTimeField(null=True, blank=True)
     trial_converted = models.BooleanField(default=False , blank=True)
-
+    discount_active = models.BooleanField(default=False)
+    discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     def __str__(self):
         return f"{self.user.email} - {self.plan.name}"
 

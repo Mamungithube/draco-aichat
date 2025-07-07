@@ -1,16 +1,22 @@
-from venv import logger
-from rest_framework import viewsets, status
+
+
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.decorators import action
 from .models import SubscriptionPlan, UserSubscription, Payment ,Referral, SubscriptionStatusLog
 from .serializers import SubscriptionPlanSerializer, UserSubscriptionSerializer,PaymentSerializer,UserSerializer,ReferralSerializer,SubscriptionStatusLogSerializer,StartTrialSerializer
-
-from django.contrib.auth import get_user_model
-from django.utils import timezone
-from datetime import timedelta
 import stripe
 from django.conf import settings
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from django.utils import timezone
+from datetime import timedelta
+import logging
+from django.contrib.auth import get_user_model
+import datetime
+
+logger = logging.getLogger(__name__)
+stripe.api_key = settings.STRIPE_SECRET_KEY
+
 
 User = get_user_model()
 
@@ -114,24 +120,16 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 
-import stripe
-from django.conf import settings
-from rest_framework import viewsets, status
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from django.utils import timezone
-from datetime import timedelta
-import logging
-from .models import UserSubscription, SubscriptionPlan, Payment, Referral
-from django.contrib.auth import get_user_model
-import datetime
 
-logger = logging.getLogger(__name__)
-User = get_user_model()
-stripe.api_key = settings.STRIPE_SECRET_KEY
 
 class PaymentViewSet(viewsets.ViewSet):
     serializer_class = StartTrialSerializer
+    permission_classes = [IsAuthenticated]
+    def list(self, request):
+        payments = Payment.objects.filter(user=request.user)
+        serializer = PaymentSerializer(payments, many=True)
+        return Response(serializer.data)
+    
     @action(detail=False, methods=['POST'])
     def stripe_webhook(self, request):
         payload = request.body
@@ -243,37 +241,33 @@ class PaymentViewSet(viewsets.ViewSet):
                 {'error': 'Referral code is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+
         try:
             referral = Referral.objects.get(
                 code=code, 
-                is_active=True,
-                valid_until__gte=timezone.now()
+                is_active=True
             )
-            
-            # Apply discount logic
-            request.user.profile.discount_active = True
-            request.user.profile.discount_percent = referral.discount_percent
-            request.user.profile.save()
-            
+
+            # UserSubscription এ discount apply করুন
+            subscription = UserSubscription.objects.get(user=request.user, is_active=True)
+            subscription.discount_active = True
+            subscription.discount_percent = referral.discount_percent
+            subscription.save()
+
             return Response({
                 'success': True,
                 'discount_percent': referral.discount_percent,
                 'message': 'Discount applied successfully'
             })
-            
+
         except Referral.DoesNotExist:
             return Response(
-                {'error': 'Invalid or expired referral code'},
+                {'error': 'Invalid referral code'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
-    @action(detail=False, methods=['GET'])
-    def verify_payment(self, request):
-        payment_intent_id = request.query_params.get('payment_intent')
-        if not payment_intent_id:
+        except UserSubscription.DoesNotExist:
             return Response(
-                {'error': 'payment_intent parameter is required'},
+                {'error': 'No active subscription found'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -313,7 +307,42 @@ class PaymentViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        
+    @action(detail=False, methods=['get'])
+    def verify_payment(self, request):
+        payment_intent_id = request.query_params.get('payment_intent_id')
+
+        if not payment_intent_id:
+            return Response({'error': 'payment_intent_id is required'}, status=400)
+
+        try:
+            payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+
+            if payment_intent.status == 'succeeded':
+                subscription = UserSubscription.objects.get(
+                    user=request.user,
+                    payment_method='stripe',
+                    is_active=True
+                )
+
+                return Response({
+                    'status': 'success',
+                    'subscription': UserSubscriptionSerializer(subscription).data,
+                    'payment_details': {
+                        'amount': payment_intent.amount / 100,
+                        'currency': payment_intent.currency,
+                        'date': datetime.fromtimestamp(payment_intent.created)
+                    }
+                })
+            else:
+                return Response({
+                    'status': 'pending',
+                    'payment_status': payment_intent.status
+                })
+
+        except UserSubscription.DoesNotExist:
+            return Response({'error': 'Subscription not found'}, status=404)
+        except stripe.error.StripeError as e:
+            return Response({'error': str(e)}, status=400)  
         
 
 class ReferralViewSet(viewsets.ModelViewSet):
