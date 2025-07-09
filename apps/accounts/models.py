@@ -5,7 +5,7 @@ class User(AbstractUser):
     
     email = models.EmailField(unique=True)
     profile_picture = models.ImageField(upload_to='profiles/', null=True, blank=True)
-    bio = models.TextField(blank=True, null=True)
+
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username']
@@ -16,6 +16,7 @@ class User(AbstractUser):
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
     otp = models.CharField(max_length=6, blank=True, null=True)
-
+    is_verified = models.BooleanField(default=False)
+    
     def __str__(self):  
         return self.user.username

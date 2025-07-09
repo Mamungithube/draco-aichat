@@ -1,23 +1,18 @@
-# accounts/serializers.py
 from rest_framework import serializers
-from .models import User, Profile # Import Profile model
-from .utils import generate_otp # Make sure utils.py is in the same directory
+from .models import User, Profile
+from .utils import generate_otp
 from django.core.mail import send_mail
-# from rest_framework_simplejwt.tokens import RefreshToken # Not directly used in serializers, but useful for views
 from rest_framework_simplejwt.tokens import RefreshToken
+
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        # Removed password, confirm_password, first_name, last_name
-        fields = ['id', 'email', 'profile_picture', 'bio']
-        read_only_fields = ['id', 'email'] # Email should not be updatable directly via this serializer
+        fields = ['id', 'email', 'profile_picture']
+        read_only_fields = ['id', 'email']
 
     def update(self, instance, validated_data):
-        # Allow updating profile_picture and bio
-        # Ensure email is not in validated_data if you want to keep it read-only
         instance.profile_picture = validated_data.get('profile_picture', instance.profile_picture)
-        instance.bio = validated_data.get('bio', instance.bio)
         instance.save()
         return instance
 
@@ -25,8 +20,38 @@ class UserSerializer(serializers.ModelSerializer):
 class RegistrationSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        # Only 'email' is required for registration, no password, etc.
-        fields = ['email'] # Only email for registration
+        fields = ['email']
+
+    def create(self, validated_data):
+        email = validated_data['email']
+
+        # Check if user already exists
+        if User.objects.filter(email=email).exists():
+            raise serializers.ValidationError("User with this email already exists.")
+
+        # Create user with inactive status
+        user = User.objects.create_user(
+            email=email,
+            username=email,
+            password='dummy-password-for-otp-flow',
+            is_active=False  # ✅ Set inactive
+        )
+
+        # Generate OTP and create profile
+        otp = generate_otp()
+        Profile.objects.create(user=user, otp=otp, is_verified=False)
+
+        # Send OTP via email
+        send_mail(
+            'Your OTP Code for Account Verification',
+            f'Dear {email},\n\nYour OTP code is: {otp}\n\nPlease use this code to verify your account.',
+            'mdmamun340921@gmail.com',
+            [email],
+            fail_silently=False,
+        )
+
+        return user
+
 
 class VerifyOTPSerializer(serializers.Serializer):
     email = serializers.EmailField()
@@ -38,35 +63,3 @@ class VerifyOTPSerializer(serializers.Serializer):
             'refresh': str(refresh),
             'access': str(refresh.access_token)
         }
-
-    def create(self, validated_data):
-        email = validated_data['email']
-        
-        # Create user with a dummy password and set username to email
-        # User.objects.create_user handles hashing
-        user = User.objects.create_user(email=email, username=email, password='dummy-password-for-otp-flow')
-        user.is_active = False # User is inactive until OTP is verified
-        user.save()
-
-        # Create or update profile and generate OTP
-        profile, created = Profile.objects.get_or_create(user=user)
-        otp_code = generate_otp()
-        profile.otp = otp_code
-        profile.is_verified = False # Ensure it's not verified yet
-        profile.save()
-
-        # Send OTP email
-        email_subject = 'Your OTP Code for Account Verification'
-        email_body = f'Dear {user.email},\n\nYour OTP code is: {otp_code}\n\nPlease use this code to verify your account.'
-        send_mail(
-            email_subject,
-            email_body,
-            'mdmamun340921@gmail.com', # Your sender email
-            [user.email],
-            fail_silently=False,
-        )
-
-        return user
-    
-    
-    

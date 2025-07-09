@@ -5,20 +5,21 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.core.mail import send_mail
-from rest_framework_simplejwt.tokens import RefreshToken # For logout
+from rest_framework_simplejwt.tokens import RefreshToken
 
-from django.template.loader import render_to_string # If you want to use HTML emails
-from django.core.mail import EmailMultiAlternatives # For sending HTML emails
+# If you want to use HTML emails
+from django.template.loader import render_to_string
+from django.core.mail import EmailMultiAlternatives  # For sending HTML emails
 
-from .models import User, Profile # Import both User and Profile
+from .models import User, Profile  # Import both User and Profile
 from .serializers import UserSerializer, RegistrationSerializer
-from .utils import generate_otp # Ensure this utility exists
+from .utils import generate_otp  # Ensure this utility exists
 from .serializers import VerifyOTPSerializer
-# Removed Djoser related imports as you're handling registration manually
-# Removed django.contrib.auth.models.User as you're using your custom User model
-# Removed authenticate, login as you're using token-based auth with OTP verification
 
-class ProfileView(APIView): # Changed from generics.RetrieveUpdateAPIView to APIView for more control if needed
+
+
+# Changed from generics.RetrieveUpdateAPIView to APIView for more control if needed
+class ProfileView(APIView):
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
 
@@ -27,15 +28,17 @@ class ProfileView(APIView): # Changed from generics.RetrieveUpdateAPIView to API
         return Response(serializer.data)
 
     def put(self, request):
-        serializer = self.serializer_class(request.user, data=request.data, partial=True)
+        serializer = self.serializer_class(
+            request.user, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
 class UserAPIView(APIView):
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request, pk=None):
         if pk:
             user = get_object_or_404(User, pk=pk)
@@ -61,15 +64,18 @@ class UserAPIView(APIView):
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+
+
 class RegisterAPIView(APIView):
     # Removed serializer_class attribute, instantiate directly in post
     # serializer_class = RegistrationSerializer # Not necessary for simple APIView
 
     def post(self, request):
-        serializer = RegistrationSerializer(data=request.data) # Instantiate directly
+        serializer = RegistrationSerializer(
+            data=request.data)  # Instantiate directly
         if serializer.is_valid():
-            user = serializer.save() # User and Profile created, OTP sent in serializer's create method
+            # User and Profile created, OTP sent in serializer's create method
+            user = serializer.save()
             return Response({'detail': 'Registration successful. Check your email for OTP verification.'}, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -88,7 +94,8 @@ class ResendOTPApiView(APIView):
         if user.is_active:
             return Response({'message': 'Account is already active. No need to resend OTP.'}, status=status.HTTP_200_OK)
 
-        profile, created = Profile.objects.get_or_create(user=user) # Get or create profile
+        profile, created = Profile.objects.get_or_create(
+            user=user)  # Get or create profile
         otp_code = generate_otp()
         profile.otp = otp_code
         profile.save(update_fields=['otp'])
@@ -102,8 +109,6 @@ class ResendOTPApiView(APIView):
         )
 
         return Response({'message': 'New OTP has been sent to your email.'}, status=status.HTTP_200_OK)
-
-
 
 
 class VerifyOTPApiView(APIView):
@@ -148,9 +153,9 @@ class VerifyOTPApiView(APIView):
         return Response({'error': 'Invalid OTP.'}, status=status.HTTP_400_BAD_REQUEST)
 
 
-
 class LogoutAPIView(APIView):
-    permission_classes = [IsAuthenticated] # Requires authentication to log out
+    # Requires authentication to log out
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
         try:
@@ -176,7 +181,7 @@ class LogoutAPIView(APIView):
 
 
 class DeleteAccountView(APIView):
-    permission_classes = [IsAuthenticated] 
+    permission_classes = [IsAuthenticated]
 
     def delete(self, request):
         user = request.user
